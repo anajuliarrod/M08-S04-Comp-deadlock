@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# C
+*.o
+*.out
+
+# Ambiente local
+.env
+.claude/
+CLAUDE.local.md
+.vscode/
+.idea/
+.DS_Store
