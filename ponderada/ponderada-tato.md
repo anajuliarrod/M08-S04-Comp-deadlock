@@ -133,7 +133,7 @@ Continuam causando bolha as duas dependências **load-use**: I1 → I2 (x5) e I3
 
 **4. Reordene as instruções, sem mudar o resultado, para eliminar todas as bolhas com forwarding. Mostre a nova ordem e o novo total de ciclos.**
 
-Basta subir o `lw x7` para antes do `add`. A troca é segura porque o `add` não usa x7 (sem RAW) nem altera x11 (sem antidependência), os dois escrevem em registradores diferentes (sem dependência de saída), e não há escrita na memória entre eles.
+Basta subir o `lw x7` para antes do `add`. A troca é segura porque o `add` não usa x7 (sem antidependência) nem altera x11 (sem RAW), os dois escrevem em registradores diferentes (sem dependência de saída), e não há escrita na memória entre eles.
 
 ```asm
 lw   x5, 0(x10)     # lê a amostra nova
