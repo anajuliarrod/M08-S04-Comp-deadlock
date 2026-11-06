@@ -58,13 +58,13 @@ T' = 5,625 ms / 1,923 = 2,925 ms
 
 **4. Em até cinco linhas: por que a Plataforma V precisa de cache e a H funciona sem? Use a ideia de gargalo de Von Neumann.**
 
-A Plataforma V roda a 1,2 GHz, e instruções e dados dividem o mesmo caminho até uma DRAM externa, muito lenta para esse ritmo. Esse é o gargalo de Von Neumann: sem uma cache próxima ao núcleo, o processador passaria a maior parte do tempo esperando a memória. A Plataforma H é Harvard, com caminhos separados para instruções e dados, então não tem essa disputa. A 48 MHz, sua SRAM interna responde em 1 ciclo e acompanha o processador, sem diferença de velocidade para a cache compensar.
+A V roda a 1,2 GHz e busca instruções e dados pelo mesmo caminho até uma DRAM externa lenta: é o gargalo de Von Neumann. Sem cache, com 120 ciclos por acesso, o CPI iria a 1 + 1,3 × 120 = 157. A H é Harvard, com caminhos separados, e a 48 MHz sua SRAM responde em 1 ciclo, sem diferença de velocidade para compensar.
 
 **5. Evidência da sua máquina. Cole o print das caches do seu computador. A sua L1 é dividida em instruções e dados? Então o seu computador é Von Neumann ou Harvard? Justifique.**
 
 ![Saída do lscpu mostrando as caches](img/lscpu.png)
 
-Sim, a L1 é dividida em L1d (dados) e L1i (instruções). Os valores de 352 KiB e 576 KiB são totais somados entre as 10 instâncias de cada cache, não o tamanho de uma L1. A saída de `lscpu -C` mostra o tipo de cada nível, com L2 e L3 unificadas:
+Sim, a L1 é dividida em L1d (dados) e L1i (instruções). Os valores de 352 KiB e 576 KiB são totais somados entre as 10 instâncias de cada cache, não o tamanho de uma L1. Como o processador é híbrido, as instâncias não são iguais: L1d = 2 × 48K + 8 × 32K = 352K e L1i = 2 × 32K + 8 × 64K = 576K, com 2 núcleos P e 8 núcleos E. A coluna ONE-SIZE de `lscpu -C` mostra só o valor do núcleo P. Essa saída também mostra o tipo de cada nível, com L2 e L3 unificadas:
 
 ```text
 NAME ONE-SIZE ALL-SIZE WAYS TYPE        LEVEL  SETS PHY-LINE COHERENCY-SIZE
@@ -129,7 +129,7 @@ Legenda: `st` é um ciclo de parada. O banco de registradores escreve na primeir
 
 **Total: 13 ciclos** (7 + 4 + 2 paradas).
 
-Continuam causando bolha as duas dependências **load-use**: I1 → I2 (x5) e I3 → I4 (x7). O `lw` só tem o dado no fim do estágio MEM, mas a instrução seguinte precisaria dele no início do EX, que ocorre nesse mesmo ciclo. O forwarding leva um valor para a frente, nunca para trás no tempo, então é preciso esperar 1 ciclo. Já a dependência I4 → I5 (x6) se resolve sem parada, porque o resultado do `sub` existe ao fim do EX.
+Continuam causando bolha as duas dependências **load-use**: I1 → I2 (x5) e I3 → I4 (x7). O `lw` só tem o dado no fim do estágio MEM, mas a instrução seguinte precisaria dele no início do EX, que ocorre nesse mesmo ciclo. O forwarding leva um valor para a frente, nunca para trás no tempo, então é preciso esperar 1 ciclo. Já a dependência I4 → I5 (x6) se resolve sem parada, porque o resultado do `sub` existe ao fim do EX. A I2 → I4 (x6) também não para: com a bolha, o `sub` faz ID no ciclo 7, junto do WB do `add`, e lê o valor pelo banco de registradores.
 
 **4. Reordene as instruções, sem mudar o resultado, para eliminar todas as bolhas com forwarding. Mostre a nova ordem e o novo total de ciclos.**
 
@@ -210,7 +210,7 @@ O código está em `/ponderada/codigo`, em Python 3 com `threading`, com N = 7. 
 | 3 | 2 | 0 | 20.000 | 0 | Sim |
 | 3 | 3 | 0 | 20.000 | 0 | Sim |
 
-Os números fecham: consumidas = (20.000 − perdidas) + duplicadas. Na execução 2 da versão 1, 20.000 − 1.590 + 1.476 = 19.886.
+Os números fecham: consumidas = (20.000 − perdidas) + duplicadas + inválidas, e as leituras inválidas deram 0 em todas as execuções. Na execução 2 da versão 1, 20.000 − 1.590 + 1.476 = 19.886. Essa conta é só uma checagem de consistência, porque vale por construção. Na versão 1, a coluna de perdidas conta toda amostra que o consumidor nunca recebeu: sobrescritas, deixadas no buffer ou nunca produzidas, porque o produtor é interrompido quando o consumidor termina. Por isso, numa execução que completa 20.000 leituras, como a execução 1, perdidas e duplicadas são iguais.
 
 **Prints**
 
@@ -228,7 +228,7 @@ A região crítica é o trecho que lê, altera e escreve o contador `ocupadas`, 
 2. O consumidor lê 3, retira uma amostra e escreve 2.
 3. O produtor volta e escreve 4. A saída do consumidor foi apagada.
 
-Agora o contador diz 4, mas há 3 amostras no buffer. Com o contador **acima** do real, o consumidor lê uma posição que já tinha lido, o que **duplica** a amostra. Na ordem inversa, o contador fica **abaixo** do real, o produtor acha que há vaga e sobrescreve uma amostra ainda não lida, o que a **perde**. Se o contador chega a 0 depois que o produtor terminou, o consumidor espera por amostras que nunca chegam, e isso é o **travamento** das execuções 2 e 3.
+Agora o contador diz 4, mas há 3 amostras no buffer. Com o contador **acima** do real, o consumidor lê uma posição que já tinha lido, o que **duplica** a amostra. Na ordem inversa, o contador fica **abaixo** do real, o produtor acha que há vaga e sobrescreve uma amostra ainda não lida, o que a **perde**. Essa é a causa principal da coluna de perdidas, que inclui também os casos descritos na tabela. Se o contador chega a 0 depois que o produtor terminou, o consumidor espera por amostras que nunca chegam, e isso é o **travamento** das execuções 2 e 3. A execução 1 não travou porque o consumidor completou as 20.000 leituras, contando as repetidas, antes de isso acontecer.
 
 **O que cada um dos três semáforos garante na versão 2?**
 
@@ -240,7 +240,7 @@ Além disso, as esperas deixam de consumir CPU, porque a thread dorme no semáfo
 
 **O que aconteceu na versão 3, e por quê?**
 
-As três execuções travaram em deadlock, sem nenhuma amostra consumida, e o consumidor encerrou após o limite de 1 s. Uma inspeção do estado no instante do travamento mostrou `ocupadas = 7`, `vazio = 0`, `mutex = 0`, `cheio = 6` e o produtor ainda vivo.
+As três execuções travaram em deadlock, sem nenhuma amostra consumida, e o consumidor encerrou após o limite de 1 s. Uma inspeção do estado no instante do travamento, feita com instrumentação temporária que não faz parte do código entregue, mostrou `ocupadas = 7`, `vazio = 0`, `mutex = 0`, `cheio = 6` e o produtor ainda vivo.
 
 Isso mostra a sequência: o produtor encheu as 7 posições e, na amostra seguinte, fez `wait(mutex)` com sucesso e dormiu em `wait(vazio)` **segurando o mutex**. O consumidor fez `wait(cheio)`, o que explica o 6, e dormiu em `wait(mutex)`. O produtor só acorda com um `signal(vazio)`, que só o consumidor faz, e o consumidor só avança quando o produtor soltar o mutex. É uma espera circular.
 
@@ -280,7 +280,7 @@ Como cada recurso tem uma única instância, o ciclo no grafo confirma o deadloc
 
 **3. Proponha duas correções de tipos diferentes (por exemplo, uma de prevenção e uma de detecção e recuperação). Para cada uma, diga o que muda para quem está usando a pulseira.**
 
-**Correção 1: prevenção, quebrando a espera circular.** Supondo que `ajusta_sensor()` só precisa do I2C, `thread_config` solta o BLE antes de pegar o barramento. Ela nunca mais espera segurando um recurso, e a aresta que fechava o ciclo some. `thread_sensor` e `thread_log` continuam com posse e espera, mas, sem ciclo, nenhuma delas fica presa para sempre.
+**Correção 1: prevenção, quebrando a espera circular.** Supondo que `ajusta_sensor()` só precisa do I2C e que `recebe_comando()` sempre retorna, `thread_config` solta o BLE antes de pegar o barramento. Ela nunca mais espera segurando um recurso, e a aresta que fechava o ciclo some. `thread_sensor` e `thread_log` continuam com posse e espera, mas, sem ciclo, nenhuma delas fica presa para sempre.
 
 ```c
 thread_config:
@@ -292,9 +292,9 @@ thread_config:
   V(i2c)
 ```
 
-*Para quem usa:* a pulseira deixa de congelar por essa causa, sem nenhuma mudança perceptível no uso. É a correção definitiva, mas exige reescrita e novos testes.
+*Para quem usa:* a pulseira deixa de congelar por essa causa, sem mudança no uso. A cadeia sensor → log → BLE continua, então a espera do sensor enquanto segura o I2C precisa ser medida para confirmar os 5 ms. É a correção definitiva, mas exige reescrita e novos testes.
 
-**Correção 2: detecção e recuperação, com watchdog.** Cada thread sinaliza periodicamente que está viva. Se um sinal parar de chegar, o watchdog assume que houve deadlock e reinicia a pulseira, liberando todos os recursos.
+**Correção 2: detecção e recuperação, com watchdog de hardware.** Cada thread sinaliza periodicamente que está viva. Se um sinal parar de chegar, o watchdog, que é de hardware para não travar junto, assume que houve deadlock e reinicia a pulseira, o que zera os semáforos em RAM. O reset não garante os recursos externos: o log pode ficar pela metade, e um escravo I2C pode segurar o barramento. Por isso, o boot reinicializa o I2C e valida o log. Matar só uma thread não serve, porque deixaria o recurso que ela segurava em estado inconsistente.
 
 *Para quem usa:* o deadlock continua existindo, mas a pulseira não fica mais congelada até desligar e ligar. A pessoa perde cerca de 4 segundos de vibração, avisada por um pulso longo, e esses segundos são perigosos para quem está andando. A correção é rápida de lançar, mas trata o efeito, não a causa.
 
@@ -307,10 +307,10 @@ thread_config:
 
 **Decisão:** a Tato vai produzir com a Plataforma H com acelerador DSP, a R$ 37 por unidade.
 
-**Por quê:** a pulseira não pode atrasar, e o que interessa é a folga no pior caso. Sem o DSP, a H reprova, com 5,625 ms. Com ele, processa uma amostra em 2,925 ms, com 2,075 ms de folga, numa estimativa que ainda não inclui o BLE. A V fica em 4,203 ms no pior caso, com só 0,797 ms de folga, e esse número usa a taxa média de falta de 4,5%: acima de 7,9%, ela estoura os 5 ms. Sem Linux e sem cache, o tempo da H é previsível. Na V, a segurança da pessoa dependeria de uma média.
+**Por quê:** a pulseira não pode atrasar, e o que interessa é a folga no pior caso. Sem o DSP, a H reprova, com 5,625 ms. Com ele, processa uma amostra em 2,925 ms, com 2,075 ms de folga. A V fica em 4,203 ms no pior caso, com só 0,797 ms de folga, e esse número usa a taxa média de falta de 4,5%: acima de 7,9%, ela estoura os 5 ms. As duas contas são estimativas e ainda não incluem o BLE, mas a H não tem Linux nem faltas de cache para variar o tempo de uma amostra. Na V, a segurança da pessoa dependeria desses dois fatores.
 
-**Do que abrimos mão:** da atualização pela internet. Toda correção de firmware vai exigir cabo e assistência técnica. Quem paga é a empresa, com logística e atendimento, e quem usa a pulseira, que fica sem ela enquanto a atualização é feita. Uma pessoa com deficiência visual pode ter dificuldade para se deslocar até a assistência, e isso também pesa. Em troca, economizamos R$ 33 por unidade.
+**Do que abrimos mão:** da atualização pela internet. Toda correção de firmware vai exigir cabo e assistência técnica, então a correção definitiva do deadlock da A5 entra antes da produção. Quem paga é a empresa, com logística e atendimento, e quem usa a pulseira, que fica sem ela enquanto a atualização é feita. Uma pessoa com deficiência visual pode ter dificuldade para se deslocar até a assistência, e isso também pesa. Em troca, economizamos R$ 33 por unidade.
 
 **Impacto e segurança:** quem usa ganha um produto de resposta estável. A superfície de ataque é menor, sem sistema operacional completo e sem acesso à internet. O risco é outro: uma falha no BLE não tem isolamento de processos e, uma vez descoberta, não pode ser corrigida rapidamente em toda a base. Por isso, o BLE terá uma interface mínima, com uma lista fechada de comandos validados, e o firmware passará por revisão de segurança mais rigorosa antes do lançamento.
 
-**O que me faria mudar de ideia:** adotarei a V se o custo de atualização por cabo passar de R$ 33 por pulseira ao longo da vida útil, desde que testes em hardware real mostrem pior caso abaixo de 5 ms sob carga máxima. Também reabro a decisão se o pior caso medido da H com DSP passar de 5 ms.
+**O que me faria mudar de ideia:** adotarei a V se, no primeiro ano em campo, surgir mais de uma falha crítica de firmware que obrigue chamar toda a base para a assistência, desde que testes em hardware real mostrem pior caso abaixo de 5 ms sob carga máxima. Também reabro a decisão se o pior caso medido da H com DSP passar de 5 ms.
