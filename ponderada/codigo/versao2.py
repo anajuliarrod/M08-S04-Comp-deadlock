@@ -20,7 +20,14 @@ class Estado:
     """Dados compartilhados e semáforos de uma execução."""
 
     def __init__(self):
-        """Cria o buffer vazio e os três semáforos com seus valores iniciais."""
+        """Cria o buffer vazio e os três semáforos com seus valores iniciais.
+
+        Parâmetros:
+            nenhum.
+
+        Retorno:
+            None.
+        """
         self.buffer = [-1] * N
         self.ocupadas = 0
         self.parar = False

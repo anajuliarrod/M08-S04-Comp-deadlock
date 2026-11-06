@@ -58,13 +58,23 @@ T' = 5,625 ms / 1,923 = 2,925 ms
 
 **4. Em até cinco linhas: por que a Plataforma V precisa de cache e a H funciona sem? Use a ideia de gargalo de Von Neumann.**
 
-A Plataforma V opera em frequência alta, 1,2 GHz, e instruções e dados dividem o mesmo caminho até uma DRAM externa, muito lenta para esse ritmo. Esse é o gargalo de Von Neumann: sem uma cache próxima ao núcleo, o processador ficaria a maior parte do tempo ocioso, esperando a memória. Já a Plataforma H opera em frequência baixa, 48 MHz, e sua SRAM interna responde em 1 ciclo, acompanhando o ritmo do processador. Não há diferença de velocidade para a cache compensar.
+A Plataforma V roda a 1,2 GHz, e instruções e dados dividem o mesmo caminho até uma DRAM externa, muito lenta para esse ritmo. Esse é o gargalo de Von Neumann: sem uma cache próxima ao núcleo, o processador passaria a maior parte do tempo esperando a memória. A Plataforma H é Harvard, com caminhos separados para instruções e dados, então não tem essa disputa. A 48 MHz, sua SRAM interna responde em 1 ciclo e acompanha o processador, sem diferença de velocidade para a cache compensar.
 
 **5. Evidência da sua máquina. Cole o print das caches do seu computador. A sua L1 é dividida em instruções e dados? Então o seu computador é Von Neumann ou Harvard? Justifique.**
 
 ![Saída do lscpu mostrando as caches](img/lscpu.png)
 
-Sim, a L1 é dividida em L1d (dados, 352 KiB) e L1i (instruções, 576 KiB), enquanto L2 e L3 são unificadas. O computador é **Von Neumann do ponto de vista do programa**, porque instruções e dados ficam na mesma RAM, no mesmo espaço de endereços. A separação existe só no nível da L1, o que se chama **Harvard modificada**: o núcleo busca instrução e dado ao mesmo tempo sem disputar a mesma cache, e isso alivia o gargalo sem deixar de ser uma máquina de programa armazenado.
+Sim, a L1 é dividida em L1d (dados) e L1i (instruções). Os valores de 352 KiB e 576 KiB são totais somados entre as 10 instâncias de cada cache, não o tamanho de uma L1. A saída de `lscpu -C` mostra o tipo de cada nível, com L2 e L3 unificadas:
+
+```text
+NAME ONE-SIZE ALL-SIZE WAYS TYPE        LEVEL  SETS PHY-LINE COHERENCY-SIZE
+L1d       48K     352K   12 Data            1    64        1             64
+L1i       32K     576K    8 Instruction     1    64        1             64
+L2       1,3M     6,5M   10 Unified         2  2048        1             64
+L3        12M      12M   12 Unified         3 16384        1             64
+```
+
+O computador é **Von Neumann do ponto de vista do programa**, porque instruções e dados ficam na mesma RAM, no mesmo espaço de endereços. A separação existe só no nível da L1, o que se chama **Harvard modificada**: o núcleo busca instrução e dado ao mesmo tempo sem disputar a mesma cache, e isso alivia o gargalo sem deixar de ser uma máquina de programa armazenado.
 
 ### A2. Pipeline: o loop do filtro
 
@@ -91,7 +101,7 @@ Entre iterações do laço, que não geram bolha dentro do trecho:
 
 **2. Sem forwarding: desenhe o diagrama do pipeline ciclo a ciclo e diga quantos ciclos o trecho leva do primeiro IF ao último WB.**
 
-Legenda: `st` é um ciclo de parada. O banco de registradores escreve na primeira metade do ciclo e lê na segunda, então uma instrução pode fazer ID no mesmo ciclo do WB de quem produz o valor.
+Legenda: `st` é um ciclo de parada. O banco de registradores escreve na primeira metade do ciclo e lê na segunda, então uma instrução pode fazer ID no mesmo ciclo do WB de quem produz o valor. `st` logo depois de `IF` representa a instrução retida em ID. Quando a instrução seguinte também espera, seu `IF` aparece só no último ciclo da espera, embora ela já tenha sido buscada e fique retida. A convenção não muda os totais.
 
 | | c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -123,7 +133,7 @@ Continuam causando bolha as duas dependências **load-use**: I1 → I2 (x5) e I3
 
 **4. Reordene as instruções, sem mudar o resultado, para eliminar todas as bolhas com forwarding. Mostre a nova ordem e o novo total de ciclos.**
 
-Basta subir o `lw x7` para antes do `add`. A troca é segura porque o `add` não usa x7 nem altera x11, e não há escrita na memória entre os dois.
+Basta subir o `lw x7` para antes do `add`. A troca é segura porque o `add` não usa x7 (sem RAW) nem altera x11 (sem antidependência), os dois escrevem em registradores diferentes (sem dependência de saída), e não há escrita na memória entre eles.
 
 ```asm
 lw   x5, 0(x10)     # lê a amostra nova
@@ -270,7 +280,7 @@ Como cada recurso tem uma única instância, o ciclo no grafo confirma o deadloc
 
 **3. Proponha duas correções de tipos diferentes (por exemplo, uma de prevenção e uma de detecção e recuperação). Para cada uma, diga o que muda para quem está usando a pulseira.**
 
-**Correção 1: prevenção, eliminando a posse e espera em `thread_config`.** A thread solta o BLE antes de pegar o barramento, já que `ajusta_sensor()` só precisa do I2C. Isso quebra o ciclo: `thread_config` nunca mais espera segurando um recurso.
+**Correção 1: prevenção, quebrando a espera circular.** Supondo que `ajusta_sensor()` só precisa do I2C, `thread_config` solta o BLE antes de pegar o barramento. Ela nunca mais espera segurando um recurso, e a aresta que fechava o ciclo some. `thread_sensor` e `thread_log` continuam com posse e espera, mas, sem ciclo, nenhuma delas fica presa para sempre.
 
 ```c
 thread_config:
@@ -286,7 +296,7 @@ thread_config:
 
 **Correção 2: detecção e recuperação, com watchdog.** Cada thread sinaliza periodicamente que está viva. Se um sinal parar de chegar, o watchdog assume que houve deadlock e reinicia a pulseira, liberando todos os recursos.
 
-*Para quem usa:* o deadlock continua existindo, mas não fica mais congelado até desligar e ligar. A pessoa perde cerca de 4 segundos de vibração, avisada por um pulso longo, e esses segundos são perigosos para quem está andando. A correção é rápida de lançar, mas trata o efeito, não a causa.
+*Para quem usa:* o deadlock continua existindo, mas a pulseira não fica mais congelada até desligar e ligar. A pessoa perde cerca de 4 segundos de vibração, avisada por um pulso longo, e esses segundos são perigosos para quem está andando. A correção é rápida de lançar, mas trata o efeito, não a causa.
 
 ## PARTE B - Decisão como CTO
 
@@ -297,7 +307,7 @@ thread_config:
 
 **Decisão:** a Tato vai produzir com a Plataforma H com acelerador DSP, a R$ 37 por unidade.
 
-**Por quê:** a pulseira não pode atrasar, e o que interessa é a folga no pior caso. Com o DSP, a H processa uma amostra em 2,925 ms, com 2,075 ms de folga. A V fica em 4,203 ms no pior caso, com só 0,797 ms de folga, e esse número usa a taxa média de falta de 4,5%: acima de 7,9%, ela estoura os 5 ms. Sem Linux e sem cache, o tempo da H é previsível. Na V, a segurança da pessoa dependeria de uma média.
+**Por quê:** a pulseira não pode atrasar, e o que interessa é a folga no pior caso. Sem o DSP, a H reprova, com 5,625 ms. Com ele, processa uma amostra em 2,925 ms, com 2,075 ms de folga, numa estimativa que ainda não inclui o BLE. A V fica em 4,203 ms no pior caso, com só 0,797 ms de folga, e esse número usa a taxa média de falta de 4,5%: acima de 7,9%, ela estoura os 5 ms. Sem Linux e sem cache, o tempo da H é previsível. Na V, a segurança da pessoa dependeria de uma média.
 
 **Do que abrimos mão:** da atualização pela internet. Toda correção de firmware vai exigir cabo e assistência técnica. Quem paga é a empresa, com logística e atendimento, e quem usa a pulseira, que fica sem ela enquanto a atualização é feita. Uma pessoa com deficiência visual pode ter dificuldade para se deslocar até a assistência, e isso também pesa. Em troca, economizamos R$ 33 por unidade.
 

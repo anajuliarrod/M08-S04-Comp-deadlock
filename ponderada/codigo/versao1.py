@@ -20,7 +20,14 @@ class Estado:
     """Dados compartilhados entre as threads, sem nenhuma proteção."""
 
     def __init__(self):
-        """Cria o buffer vazio, com -1 marcando posições nunca escritas."""
+        """Cria o buffer vazio, com -1 marcando posições nunca escritas.
+
+        Parâmetros:
+            nenhum.
+
+        Retorno:
+            None.
+        """
         self.buffer = [-1] * N
         self.ocupadas = 0
         self.parar = False

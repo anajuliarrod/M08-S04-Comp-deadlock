@@ -65,6 +65,9 @@ def apurar(lidas, total, travou, duracao_s):
 def ler_argumentos():
     """Lê as opções de linha de comando.
 
+    Parâmetros:
+        nenhum. Os valores vêm de sys.argv, lido pelo argparse.
+
     Retorno:
         Um argparse.Namespace com os campos amostras e execucoes. Sem
         opções, valem os padrões do enunciado: 20.000 amostras, 3 execuções.
